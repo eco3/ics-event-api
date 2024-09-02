@@ -1,29 +1,40 @@
-import requests
 from datetime import datetime
 
-from flask import Blueprint, jsonify, request, Response
+import requests
+from flask import Blueprint, Response, jsonify, request
 
-from app.event_fetcher import fetch_events, ICS_URL
+from app.event_fetcher import ICS_URL, fetch_events
 
 app = Blueprint('app', __name__)
 
 @app.route('/api/events', methods=['GET'])
 def get_events():
-    events = fetch_events()
-    return jsonify(events)
+    try:
+        events = fetch_events()
+        return jsonify({"events": events})
+    except Exception as e:
+        return jsonify({"events": None, "error": str(e)}), 500
+
 
 @app.route('/api/events', methods=['POST'])
 def post_events():
     data = request.json
     current_time = data.get('current_time')
 
-    if current_time:
-        current_time = datetime.fromisoformat(current_time)
-    else:
-        current_time = None
+    try:
+        # Check if current_time is not None and contains a 'Z' (indicating UTC time)
+        #  If so, replace 'Z' with '+00:00' to make it parsable by fromisoformat
+        current_time = current_time.replace("Z", "+00:00") if current_time and "Z" in current_time else current_time
+        # Parse the ISO string into a datetime object if current_time is not None
+        current_time = datetime.fromisoformat(current_time) if current_time else None
 
-    events = fetch_events(current_time)
-    return jsonify(events)
+        events = fetch_events(current_time)
+        return jsonify({"events": events})
+    except ValueError:
+        return jsonify({"events": None, "error": "Invalid date format. Use ISO format (YYYY-MM-DDTHH:MM:SS)"}), 400
+    except Exception as e:
+        return jsonify({"events": None, "error": str(e)}), 500
+
 
 @app.route('/api/ics')
 def get_ics():
