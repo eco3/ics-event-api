@@ -14,7 +14,7 @@ def get_events():
         events = fetch_events()
 
         # Serialize events
-        event_schema = EventSchema(many=True)
+        event_schema = EventSchema()
         events = event_schema.dump(events)
 
         return jsonify({"events": events})
@@ -37,7 +37,7 @@ def post_events():
         events = fetch_events(current_time)
 
         # Serialize events
-        event_schema = EventSchema(many=True)
+        event_schema = EventSchema()
         events = event_schema.dump(events)
 
         return jsonify({"events": events})
