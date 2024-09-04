@@ -11,9 +11,13 @@ app = Blueprint('app', __name__)
 @app.route('/api/events', methods=['GET'])
 def get_events():
     try:
-        event_schema = EventSchema(many=True)
         events = fetch_events()
-        return jsonify({"events": event_schema.dump(events)}})
+
+        # Serialize events
+        event_schema = EventSchema(many=True)
+        events = event_schema.dump(events)
+
+        return jsonify({"events": events})
     except Exception as e:
         return jsonify({"events": None, "error": str(e)}), 500
 
@@ -30,10 +34,13 @@ def post_events():
         # Parse the ISO string into a datetime object if current_time is not None
         current_time = datetime.fromisoformat(current_time) if current_time else None
 
-        event_schema = EventSchema(many=True)
         events = fetch_events(current_time)
 
-        return jsonify({"events": event_schema.dump(events)})
+        # Serialize events
+        event_schema = EventSchema(many=True)
+        events = event_schema.dump(events)
+
+        return jsonify({"events": events})
     except ValueError:
         return jsonify({"events": None, "error": "Invalid date format. Use ISO format (YYYY-MM-DDTHH:MM:SS)"}), 400
     except Exception as e:
