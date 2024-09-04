@@ -9,6 +9,8 @@ from dateutil import tz
 from dotenv import load_dotenv
 from icalendar import Calendar
 
+from app.event import Event, EventRecurrence
+
 load_dotenv()
 
 ICS_URL = os.getenv('ICS_URL')
@@ -105,17 +107,18 @@ def _get_events_from_ics(ics_content: bytes, current_time: datetime) -> list[dic
 
     for component in gcal.walk():
         if component.name == "VEVENT":
-            event = {}
             dtstart = _ensure_datetime(component.get('dtstart').dt)
             dtend = _ensure_datetime(component.get('dtend').dt)
 
-            event['title_raw'] = component.get('summary')
-            event['title'] = ' '.join(event['title_raw'].strip().split()[:3])
-            event['description'] = component.get('description')
-            event['start'] = dtstart.isoformat()
-            event['end'] = dtend.isoformat()
-            event['is_all_day'] = dtstart.time() == dt.time.min and dtend.time() == dt.time.min
-            event['recurrence'] = False
+            title_raw = component.get('summary')
+            title = ' '.join(title_raw.strip().split()[:3]).upper()
+            description = component.get('description')
+            start = dtstart.isoformat()
+            end = dtend.isoformat()
+            is_all_day = dtstart.time() == dt.time.min and dtend.time() == dt.time.min
+            recurrence = None
+
+            event = Event(title, title_raw, description, start, end, is_all_day, recurrence)
 
             if 'RRULE' in component:
                 rrule_raw = component.get('RRULE').to_ical().decode()
@@ -123,29 +126,17 @@ def _get_events_from_ics(ics_content: bytes, current_time: datetime) -> list[dic
                 next_event_occurance = rrule.after(week_start)
 
                 if next_event_occurance:
-                    event['start'] = next_event_occurance.isoformat()
-                    event['end'] = (next_event_occurance + (dtend - dtstart)).isoformat()
-                    event['recurrence'] = component.get('RRULE')
-                    
-                    # Flatten dict if only value has only one element
-                    event['recurrence'] = {k: v[0] if isinstance(v, list) and len(v) == 1 else v for k, v in event['recurrence'].items()}
-                    
-                    if 'UNTIL' in event['recurrence']:
-                        event['recurrence']['UNTIL'] = _ensure_datetime(event['recurrence']['UNTIL'])
-                        event['recurrence']['UNTIL'] = event['recurrence']['UNTIL'].isoformat()
+                    event.start = next_event_occurance.isoformat()
+                    event.end = (next_event_occurance + (dtend - dtstart)).isoformat()
 
-                    event['recurrence'] = {
-                        "text": _rrule_to_text(rrule),
-                        "rrule": event['recurrence'],
-                        "rrule_raw": rrule_raw
-                    }
+                    event.recurrence = EventRecurrence(text=_rrule_to_text(rrule), rrule=rrule_raw)
 
                     events.append(event)
             elif dtstart >= week_start:
                 events.append(event)
 
     # Sort events by start date
-    events = sorted(events, key=lambda x: x['start'])
+    events = sorted(events, key=lambda x: x.start)
 
     return events
 
