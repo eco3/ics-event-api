@@ -1,8 +1,6 @@
 import re
-from dataclasses import dataclass, field
-from typing import Optional
-from marshmallow_dataclass import class_schema
-from marshmallow import EXCLUDE
+from dataclasses import dataclass, field, asdict
+from typing import Optional, List
 import datetime as dt
 import dateutil.rrule
 
@@ -14,14 +12,8 @@ class EventRecurrence:
 
 
     def __post_init__(self):
-        
-        try:
-            rrule_object = dateutil.rrule.rrulestr(self.rrule)
-            self.text = self._rrule_to_text(rrule_object)
-        except Exception as e:
-            # Handle invalid rrule strings
-            self.text = f"Invalid rrule: {self.rrule}"
-            print(f"Error initializing rrule: {e}")
+        rrule_object = dateutil.rrule.rrulestr(self.rrule)
+        self.text = self._rrule_to_text(rrule_object)
 
     def _rrule_to_text(self, rrule: dateutil.rrule.rrule) -> str:
         """
@@ -52,6 +44,7 @@ class EventRecurrence:
                 return f"EVERY {interval} {freq_map[freq]}"
         else:
             return "REPEATING"
+
 
 @dataclass
 class Event:
@@ -94,11 +87,17 @@ class Event:
         return cleaned_string.strip()
 
 
-BaseEventSchema = class_schema(Event)
+@dataclass
+class EventList:
+    events: List[Event]
 
-class EventSchema(BaseEventSchema):
-    def __init__(self, *args, **kwargs):
-        # Set default options
-        kwargs.setdefault("many", True)
-        kwargs.setdefault("unknown", EXCLUDE)
-        super().__init__(*args, **kwargs)
+    def _asdict_exclude(self, obj):
+        result = {}
+        for key, value in asdict(obj).items():
+            field_meta = obj.__dataclass_fields__[key].metadata
+            if not field_meta.get('exclude', False):
+                result[key] = value
+        return result
+
+    def serialize(self):
+        return [self._asdict_exclude(event) for event in self.events]

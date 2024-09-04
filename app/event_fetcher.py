@@ -9,7 +9,7 @@ from dateutil import tz
 from dotenv import load_dotenv
 from icalendar import Calendar
 
-from app.event import Event, EventRecurrence
+from app.event import Event, EventRecurrence, EventList
 
 load_dotenv()
 
@@ -49,19 +49,14 @@ def _ensure_datetime(timestamp: Union[date, datetime]) -> datetime:
 
     return timestamp
 
-def _get_events_from_ics(ics_content: bytes, current_time: datetime) -> list[dict]:
+def _get_events_from_ics(ics_content: bytes, current_time: datetime) -> EventList:
     """
     Retrieves events from an iCalendar (ICS) content.
     Args:
         ics_content (bytes): The iCalendar content as bytes.
         current_time datetime: The current time.
     Returns:
-        list: A list of event dictionaries, each containing the following keys:
-            - 'title': The title of the event.
-            - 'description': The description of the event.
-            - 'start': The start date and time of the event in ISO format.
-            - 'end': The end date and time of the event in ISO format.
-            - 'recurrence': A dictionary representing the RRULE of the event, or False if the event does not recur.
+        EventList: A list of Event objects.
     Raises:
         Exception: If an error occurs while parsing the iCalendar content.
     """
@@ -106,20 +101,20 @@ def _get_events_from_ics(ics_content: bytes, current_time: datetime) -> list[dic
     # Sort events by start date
     events = sorted(events, key=lambda x: x.start)
 
-    return events
+    return EventList(events)
 
-def fetch_events(current_time: Optional[datetime]=None) -> list[dict]:
+def fetch_events(current_time: Optional[datetime]=None) -> EventList:
     """
     Fetches events from the ICS URL and returns a list of dictionaries representing the events.
     Args:
         current_time (Optional[datetime]): The current time to use for filtering events. If not provided, the current UTC time will be used.
     Returns:
-        list[dict]: A list of dictionaries representing the events. Each dictionary contains information about an event.
+        EventList: A list of Event objects.
     """
     if current_time is None:
         current_time = datetime.now(tz=tz.UTC)
 
     ics_content = _fetch_ics_from_url(ICS_URL)
-    events = _get_events_from_ics(ics_content, current_time)
+    events: EventList = _get_events_from_ics(ics_content, current_time)
 
     return events
