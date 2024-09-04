@@ -9,7 +9,7 @@ from dateutil import tz
 from dotenv import load_dotenv
 from icalendar import Calendar
 
-from app.event import Event, EventRecurrence
+from app.event import Event, EventRecurrence, EventList
 
 load_dotenv()
 
@@ -49,49 +49,14 @@ def _ensure_datetime(timestamp: Union[date, datetime]) -> datetime:
 
     return timestamp
 
-def _rrule_to_text(rrule: dateutil.rrule.rrule) -> str:
-    """
-    Converts a dateutil rrule object to a human-readable text representation.
-    Args:
-        rrule (dateutil.rrule.rrule): The rrule object to be converted.
-    Returns:
-        str: The human-readable text representation of the rrule.
-    """
-    freq_map = {
-        dateutil.rrule.DAILY: "DAILY",
-        dateutil.rrule.WEEKLY: "WEEKLY",
-        dateutil.rrule.MONTHLY: "MONTHLY",
-        dateutil.rrule.YEARLY: "YEARLY"
-    }
-    
-    interval = rrule._interval
-    freq = rrule._freq
-    
-    if freq in freq_map:
-        if interval == 1:
-            return freq_map[freq]
-        elif interval == 2 and freq == dateutil.rrule.WEEKLY:
-            return "BI-WEEKLY"
-        elif interval == 2 and freq == dateutil.rrule.DAILY:
-            return "BI-DAILY"
-        else:
-            return f"EVERY {interval} {freq_map[freq]}"
-    else:
-        return "REPEATING"
-
-def _get_events_from_ics(ics_content: bytes, current_time: datetime) -> list[dict]:
+def _get_events_from_ics(ics_content: bytes, current_time: datetime) -> EventList:
     """
     Retrieves events from an iCalendar (ICS) content.
     Args:
         ics_content (bytes): The iCalendar content as bytes.
         current_time datetime: The current time.
     Returns:
-        list: A list of event dictionaries, each containing the following keys:
-            - 'title': The title of the event.
-            - 'description': The description of the event.
-            - 'start': The start date and time of the event in ISO format.
-            - 'end': The end date and time of the event in ISO format.
-            - 'recurrence': A dictionary representing the RRULE of the event, or False if the event does not recur.
+        EventList: A list of Event objects.
     Raises:
         Exception: If an error occurs while parsing the iCalendar content.
     """
@@ -111,14 +76,12 @@ def _get_events_from_ics(ics_content: bytes, current_time: datetime) -> list[dic
             dtend = _ensure_datetime(component.get('dtend').dt)
 
             title_raw = component.get('summary')
-            title = ' '.join(title_raw.strip().split()[:3]).upper()
             description = component.get('description')
-            start = dtstart.isoformat()
-            end = dtend.isoformat()
-            is_all_day = dtstart.time() == dt.time.min and dtend.time() == dt.time.min
-            recurrence = None
 
-            event = Event(title, title_raw, description, start, end, is_all_day, recurrence)
+            event = Event(
+                title_raw=title_raw, description=description,
+                start_datetime=dtstart, end_datetime=dtend
+            )
 
             if 'RRULE' in component:
                 rrule_raw = component.get('RRULE').to_ical().decode()
@@ -129,7 +92,7 @@ def _get_events_from_ics(ics_content: bytes, current_time: datetime) -> list[dic
                     event.start = next_event_occurance.isoformat()
                     event.end = (next_event_occurance + (dtend - dtstart)).isoformat()
 
-                    event.recurrence = EventRecurrence(text=_rrule_to_text(rrule), rrule=rrule_raw)
+                    event.recurrence = EventRecurrence(rrule=rrule_raw)
 
                     events.append(event)
             elif dtstart >= week_start:
@@ -138,20 +101,20 @@ def _get_events_from_ics(ics_content: bytes, current_time: datetime) -> list[dic
     # Sort events by start date
     events = sorted(events, key=lambda x: x.start)
 
-    return events
+    return EventList(events)
 
-def fetch_events(current_time: Optional[datetime]=None) -> list[dict]:
+def fetch_events(current_time: Optional[datetime]=None) -> EventList:
     """
     Fetches events from the ICS URL and returns a list of dictionaries representing the events.
     Args:
         current_time (Optional[datetime]): The current time to use for filtering events. If not provided, the current UTC time will be used.
     Returns:
-        list[dict]: A list of dictionaries representing the events. Each dictionary contains information about an event.
+        EventList: A list of Event objects.
     """
     if current_time is None:
         current_time = datetime.now(tz=tz.UTC)
 
     ics_content = _fetch_ics_from_url(ICS_URL)
-    events = _get_events_from_ics(ics_content, current_time)
+    events: EventList = _get_events_from_ics(ics_content, current_time)
 
     return events
