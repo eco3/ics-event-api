@@ -30,7 +30,7 @@ def _fetch_ics_from_url(url: str) -> bytes:
     response.raise_for_status()  # Ensure we notice bad responses
     return response.content
 
-def _ensure_datetime(timestamp: Union[date, datetime]) -> datetime:
+def _ensure_datetime(timestamp: Union[date, datetime, str]) -> datetime:
     """
     Ensures that the given datetime object is in UTC timezone.
     Args:
@@ -40,6 +40,8 @@ def _ensure_datetime(timestamp: Union[date, datetime]) -> datetime:
     """
     if isinstance(timestamp, date) and not isinstance(timestamp, datetime):
         timestamp = datetime.combine(timestamp, dt.time.min, tzinfo=tz.UTC)
+    elif isinstance(timestamp, str):
+        timestamp = datetime.fromisoformat(timestamp)
     
     # convert to UTC timezone
     if timestamp.tzinfo is None:
@@ -89,9 +91,11 @@ def _get_events_from_ics(ics_content: bytes, current_time: datetime) -> EventLis
                 next_event_occurance = rrule.after(week_start)
 
                 if next_event_occurance:
-                    event.start = next_event_occurance.isoformat()
-                    event.end = (next_event_occurance + (dtend - dtstart)).isoformat()
+                    start_isostring: str = next_event_occurance.isoformat()
+                    end_isostring: str = (next_event_occurance + (dtend - dtstart)).isoformat()
 
+                    event.start_datetime = _ensure_datetime(start_isostring)
+                    event.end_datetime = _ensure_datetime(end_isostring)
                     event.recurrence = EventRecurrence(rrule=rrule_raw)
 
                     events.append(event)
