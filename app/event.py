@@ -1,8 +1,12 @@
-import re
-from dataclasses import dataclass, field, asdict
-from typing import Optional, List
 import datetime as dt
+import re
+from dataclasses import asdict, dataclass, field
+from typing import List, Optional
+
 import dateutil.rrule
+from icalendar.cal import Event as ICalEvent
+
+from app.datetime_converter import ensure_datetime
 
 
 @dataclass
@@ -59,10 +63,21 @@ class Event:
     end: str = field(init=False)
     is_all_day: bool = field(init=False)
 
+    @classmethod
+    def from_ical_event(cls, ical_event: ICalEvent):
+        return cls(
+            title_raw=ical_event.get('summary'),
+            description=ical_event.get('description'),
+            start_datetime=ical_event.get('dtstart').dt,
+            end_datetime=ical_event.get('dtend').dt,
+        )
 
     def __post_init__(self):
         self.title_raw = self.title_raw.strip()
         self.title = ' '.join(self.title_raw.split()[:3]).upper()
+
+        self.start_datetime = ensure_datetime(self.start_datetime)
+        self.end_datetime = ensure_datetime(self.end_datetime)
 
         self.start = self.start_datetime.isoformat()
         self.end = self.end_datetime.isoformat()

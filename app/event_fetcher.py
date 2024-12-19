@@ -1,15 +1,16 @@
 import datetime as dt
 import os
-from datetime import date, datetime
-from typing import Optional, Union
+from datetime import datetime
+from typing import Optional
 
-import dateutil.rrule
+import recurring_ical_events
 import requests
 from dateutil import tz
 from dotenv import load_dotenv
 from icalendar import Calendar
 
-from app.event import Event, EventRecurrence, EventList
+from app.datetime_converter import ensure_datetime
+from app.event import Event, EventList, EventRecurrence
 
 load_dotenv()
 
@@ -30,27 +31,6 @@ def _fetch_ics_from_url(url: str) -> bytes:
     response.raise_for_status()  # Ensure we notice bad responses
     return response.content
 
-def _ensure_datetime(timestamp: Union[date, datetime, str]) -> datetime:
-    """
-    Ensures that the given datetime object is in UTC timezone.
-    Args:
-        timestamp (date or datetime): The datetime object to be ensured.
-    Returns:
-        datetime: The datetime object in UTC timezone.
-    """
-    if isinstance(timestamp, date) and not isinstance(timestamp, datetime):
-        timestamp = datetime.combine(timestamp, dt.time.min, tzinfo=tz.UTC)
-    elif isinstance(timestamp, str):
-        timestamp = datetime.fromisoformat(timestamp)
-    
-    # convert to UTC timezone
-    if timestamp.tzinfo is None:
-        timestamp = timestamp.replace(tzinfo=tz.UTC)
-    else:
-        timestamp = timestamp.astimezone(tz.UTC)
-
-    return timestamp
-
 def _get_events_from_ics(ics_content: bytes, current_time: datetime) -> EventList:
     """
     Retrieves events from an iCalendar (ICS) content.
@@ -66,7 +46,7 @@ def _get_events_from_ics(ics_content: bytes, current_time: datetime) -> EventLis
     events = []
 
     # Ensure current_time is in UTC timezone if provided else use current time
-    current_time = _ensure_datetime(current_time)
+    current_time = ensure_datetime(current_time)
 
     # Get the start of the week, meaning monday of the current week at midnight
     week_start = current_time - dt.timedelta(days=current_time.weekday())
@@ -74,36 +54,22 @@ def _get_events_from_ics(ics_content: bytes, current_time: datetime) -> EventLis
 
     for component in gcal.walk():
         if component.name == "VEVENT":
-            dtstart = _ensure_datetime(component.get('dtstart').dt)
-            dtend = _ensure_datetime(component.get('dtend').dt)
-
-            title_raw = component.get('summary')
-            description = component.get('description')
-
-            event = Event(
-                title_raw=title_raw, description=description,
-                start_datetime=dtstart, end_datetime=dtend
-            )
+            event = Event.from_ical_event(component)
 
             if 'RRULE' in component:
-                rrule_raw = component.get('RRULE').to_ical().decode()
-                rrule = dateutil.rrule.rrulestr(rrule_raw, dtstart=dtstart)
-                next_event_occurance = rrule.after(week_start)
+                recurring_events = recurring_ical_events.of(component)
+                next_event_occurance = next((event for event in recurring_events.after(week_start)), None)
 
                 if next_event_occurance:
-                    start_isostring: str = next_event_occurance.isoformat()
-                    end_isostring: str = (next_event_occurance + (dtend - dtstart)).isoformat()
-
-                    event.start_datetime = _ensure_datetime(start_isostring)
-                    event.end_datetime = _ensure_datetime(end_isostring)
-                    event.recurrence = EventRecurrence(rrule=rrule_raw)
+                    event = Event.from_ical_event(next_event_occurance)
+                    event.recurrence = EventRecurrence(component.get('RRULE').to_ical().decode())
 
                     events.append(event)
-            elif dtstart >= week_start:
+            elif event.start_datetime >= week_start:
                 events.append(event)
 
     # Sort events by start date
-    events = sorted(events, key=lambda x: x.start)
+    events = sorted(events, key=lambda x: x.start_datetime)
 
     return EventList(events)
 
