@@ -57,23 +57,28 @@ class Event:
     start_datetime: dt.datetime = field(metadata={"exclude": True})
     end_datetime: dt.datetime  = field(metadata={"exclude": True})
     recurrence: Optional[EventRecurrence] = None
+    # None means "infer from the times" (both at midnight UTC)
+    is_all_day: Optional[bool] = None
 
     title: str = field(init=False)
     start: str = field(init=False)
     end: str = field(init=False)
-    is_all_day: bool = field(init=False)
 
     @classmethod
     def from_ical_event(cls, ical_event: ICalEvent):
+        start = ical_event.get('dtstart').dt
         return cls(
-            title_raw=ical_event.get('summary'),
+            title_raw=str(ical_event.get('summary') or ''),
             description=ical_event.get('description'),
-            start_datetime=ical_event.get('dtstart').dt,
-            end_datetime=ical_event.get('dtend').dt,
+            start_datetime=start,
+            # Event.end handles DTEND, DURATION, or neither (RFC 5545 defaults)
+            end_datetime=ical_event.end,
+            # All-day events use DATE values rather than DATE-TIME
+            is_all_day=not isinstance(start, dt.datetime),
         )
 
     def __post_init__(self):
-        self.title_raw = self.title_raw.strip()
+        self.title_raw = (self.title_raw or '').strip()
         self.title = ' '.join(self.title_raw.split()[:3]).upper()
 
         self.start_datetime = ensure_datetime(self.start_datetime)
@@ -82,7 +87,8 @@ class Event:
         self.start = self.start_datetime.isoformat()
         self.end = self.end_datetime.isoformat()
 
-        self.is_all_day = self.start_datetime.time() == dt.time.min and self.end_datetime.time() == dt.time.min
+        if self.is_all_day is None:
+            self.is_all_day = self.start_datetime.time() == dt.time.min and self.end_datetime.time() == dt.time.min
 
         self.description = self._clean_html(self.description) if self.description else ''
 

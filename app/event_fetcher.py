@@ -1,5 +1,6 @@
 import datetime as dt
 import os
+from collections import defaultdict
 from datetime import datetime
 from typing import Optional
 
@@ -16,20 +17,31 @@ load_dotenv()
 
 ICS_URL = os.getenv('ICS_URL')
 
+# (connect, read) timeout in seconds for fetching the upstream calendar
+FETCH_TIMEOUT = (5, 15)
 
-def _fetch_ics_from_url(url: str) -> bytes:
+
+def fetch_ics(url: Optional[str] = None) -> bytes:
     """
-    Fetches the content of an ICS file from the given URL.
+    Fetches the content of an ICS file from the given URL (defaults to ICS_URL).
     Args:
         url (str): The URL of the ICS file.
     Returns:
         bytes: The content of the ICS file as bytes.
     Raises:
-        requests.HTTPError: If the HTTP request to the URL fails or returns a non-successful status code.
+        requests.RequestException: If the request fails, times out or returns a non-successful status code.
     """
-    response = requests.get(url)
+    response = requests.get(url or ICS_URL, timeout=FETCH_TIMEOUT)
     response.raise_for_status()  # Ensure we notice bad responses
     return response.content
+
+
+def _first_rrule(component) -> str:
+    """Returns the component's RRULE as a string. icalendar gives a list when there are several; use the first."""
+    rrule = component.get('RRULE')
+    if isinstance(rrule, list):
+        rrule = rrule[0]
+    return rrule.to_ical().decode()
 
 def _get_events_from_ics(ics_content: bytes, current_time: datetime) -> EventList:
     """
@@ -52,21 +64,33 @@ def _get_events_from_ics(ics_content: bytes, current_time: datetime) -> EventLis
     week_start = current_time - dt.timedelta(days=current_time.weekday())
     week_start = week_start.replace(hour=0, minute=0, second=0, microsecond=0)
 
-    for component in gcal.walk():
-        if component.name == "VEVENT":
-            event = Event.from_ical_event(component)
+    # Group VEVENTs by UID so a recurring master is expanded together with its
+    # RECURRENCE-ID overrides (moved or edited single occurrences)
+    series = defaultdict(list)
+    for index, component in enumerate(gcal.walk('VEVENT')):
+        series[str(component.get('UID') or f'no-uid-{index}')].append(component)
 
-            if 'RRULE' in component:
-                recurring_events = recurring_ical_events.of(component)
-                next_event_occurance = next((event for event in recurring_events.after(week_start)), None)
+    for components in series.values():
+        master = next((c for c in components if 'RRULE' in c), None)
 
-                if next_event_occurance:
-                    event = Event.from_ical_event(next_event_occurance)
-                    event.recurrence = EventRecurrence(component.get('RRULE').to_ical().decode())
+        if master is not None:
+            series_calendar = Calendar()
+            for component in components:
+                series_calendar.add_component(component)
 
-                    events.append(event)
-            elif event.start_datetime >= week_start:
+            occurrences = recurring_ical_events.of(series_calendar).after(week_start)
+            next_occurrence = next(iter(occurrences), None)
+
+            if next_occurrence:
+                event = Event.from_ical_event(next_occurrence)
+                event.recurrence = EventRecurrence(_first_rrule(master))
                 events.append(event)
+        else:
+            for component in components:
+                event = Event.from_ical_event(component)
+                # Keep events that are still running at the week start
+                if event.end_datetime > week_start or event.start_datetime >= week_start:
+                    events.append(event)
 
     # Sort events by start date
     events = sorted(events, key=lambda x: x.start_datetime)
@@ -84,7 +108,7 @@ def fetch_events(current_time: Optional[datetime]=None) -> EventList:
     if current_time is None:
         current_time = datetime.now(tz=tz.UTC)
 
-    ics_content = _fetch_ics_from_url(ICS_URL)
+    ics_content = fetch_ics()
     events: EventList = _get_events_from_ics(ics_content, current_time)
 
     return events

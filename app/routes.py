@@ -1,56 +1,76 @@
+import logging
 from datetime import datetime
 
 import requests
 from flask import Blueprint, Response, jsonify, request
 
 from app.event import EventList
-from app.event_fetcher import ICS_URL, fetch_events
+from app.event_fetcher import fetch_events, fetch_ics
 
 app = Blueprint('app', __name__)
+logger = logging.getLogger(__name__)
+
+INVALID_DATE_ERROR = "Invalid date format. Use ISO format (YYYY-MM-DDTHH:MM:SS)"
+
+
+def _error(message: str, status: int):
+    return jsonify({"events": None, "error": message}), status
+
+
+def _events_response(current_time=None):
+    # Exception details stay in the server log: upstream errors include the
+    # full ICS_URL, which for a private feed contains a secret token.
+    try:
+        event_list: EventList = fetch_events(current_time)
+    except requests.RequestException:
+        logger.exception("Failed to fetch the ICS calendar")
+        return _error("Failed to fetch the calendar", 502)
+    except Exception:
+        logger.exception("Failed to process the ICS calendar")
+        return _error("Internal server error", 500)
+
+    return jsonify({"events": event_list.serialize()})
+
 
 @app.route('/api/events', methods=['GET'])
 def get_events():
-    try:
-        event_list: EventList = fetch_events()
-
-        return jsonify({"events": event_list.serialize()})
-    except Exception as e:
-        return jsonify({"events": None, "error": str(e)}), 500
+    return _events_response()
 
 
 @app.route('/api/events', methods=['POST'])
 def post_events():
-    data = request.json
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return _error("Request body must be a JSON object", 400)
+
     current_time = data.get('current_time')
+    if current_time is not None and not isinstance(current_time, str):
+        return _error(INVALID_DATE_ERROR, 400)
 
-    try:
-        # Check if current_time is not None and contains a 'Z' (indicating UTC time)
-        #  If so, replace 'Z' with '+00:00' to make it parsable by fromisoformat
-        current_time = current_time.replace("Z", "+00:00") if current_time and "Z" in current_time else current_time
-        # Parse the ISO string into a datetime object if current_time is not None
-        current_time = datetime.fromisoformat(current_time) if current_time else None
+    if current_time:
+        try:
+            # fromisoformat on Python 3.11+ accepts a trailing 'Z' (UTC)
+            current_time = datetime.fromisoformat(current_time)
+        except ValueError:
+            return _error(INVALID_DATE_ERROR, 400)
+    else:
+        current_time = None
 
-        event_list: EventList = fetch_events(current_time)
-
-        return jsonify({"events": event_list.serialize()})
-    except ValueError:
-        return jsonify({"events": None, "error": "Invalid date format. Use ISO format (YYYY-MM-DDTHH:MM:SS)"}), 400
-    except Exception as e:
-        return jsonify({"events": None, "error": str(e)}), 500
+    return _events_response(current_time)
 
 
 @app.route('/api/ics')
 def get_ics():
     try:
-        response = requests.get(ICS_URL)
+        content = fetch_ics()
+    except requests.RequestException:
+        logger.exception("Failed to fetch the ICS calendar")
+        return _error("Failed to fetch the calendar", 502)
 
-        if response.status_code == 200:
-            return Response(
-                response=response.content,
-                mimetype="text/calendar",
-                headers={"Content-Disposition": f"attachment; filename=cto-calendar.ics"}
-            )
-        else:
-            return f"Failed to fetch ICS file. Status code {response.status_code}", 500
-    except requests.exceptions.RequestException as e:
-        return f"An error occured: {str(e)}", 500
+    return Response(
+        response=content,
+        mimetype="text/calendar",
+        headers={"Content-Disposition": "attachment; filename=calendar.ics"}
+    )
