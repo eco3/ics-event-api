@@ -4,4 +4,6 @@ __pycache__
 *.pyd
 .Python
 .python-version
-venv/
+.venv/
+.env
+.git
