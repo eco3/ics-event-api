@@ -6,7 +6,6 @@ COPY . /app
 RUN uv sync --locked --no-dev
 
 ENV PATH="/app/.venv/bin:$PATH"
-ENV FLASK_APP=app.py
 
 EXPOSE 5000
-CMD ["flask", "run", "--host=0.0.0.0", "--port=5000"]
+CMD ["gunicorn", "--workers", "2", "--bind", "0.0.0.0:5000", "app:create_app()"]
